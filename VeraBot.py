@@ -79,7 +79,7 @@ class Person(object):
         messages = [i['message'] for i in self.api.messages.getDialogs(unread=1)['items']]
         all_ids = [message['user_id'] for message in messages]
         if self.id in all_ids:
-            index = all_ids.index(id)
+            index = all_ids.index(self.id)
             answer = messages[index]['body']
             return answer
         else:
@@ -247,7 +247,12 @@ class IdError(Exception):
 
 
 if __name__ == '__main__':
-    pass
+    bot = CBot(DB('answers.db'))
+    a = unicode(raw_input('>'))
+    while a != '':
+        print bot.think(a)
+        a = unicode(raw_input('>'))
+
 
 
 
