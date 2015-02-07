@@ -1,11 +1,14 @@
 from nose.tools import *
-import VeraBot
+from VeraBot.VeraBot import *
 
-def setup():
-    print "SETUP!"
+def test_DB():
+    db = DB('test.db')
+    assert_equal(db.name, 'test.db')
+    assert_equal(list(db.get_all_not_answered()), list())
+    db.save('fuck', 'fuck')
+    assert_equal(db.get_by_masks(['fuck']), 'fuck')
 
-def teardown():
-    print "TEAR DOWN!"
+def test_DB_thread():
+    db_thread = DB_Thread('test.db')
+    db_thread.start()
 
-def test_basic():
-    print "I RAN!"

@@ -16,6 +16,9 @@ DB_QUEUE = Queue.Queue()
 VK_DICT = collections.OrderedDict()
 VK_DICT_MUTEX = threading.Lock()
 OUT_QUEUE = Queue.Queue()
+NOT_ANSWERED = Queue.Queue()
+ITS_NOT_TIME_TO_DIE = threading.Event()
+ITS_NOT_TIME_TO_DIE.set()
 USTAT = dict()
 
 reload(sys)
@@ -47,6 +50,37 @@ def sql_from_masks(masks):
     return sql
 
 
+class Session():
+    def __init__(self):
+        pass
+
+class Dialog(threading.Thread):
+    def __init__(self):
+        self.person = Person()
+        self.c_bot = CBot()
+        threading.Thread.__init__(self)
+
+    def run(self):
+        while ITS_NOT_TIME_TO_DIE.is_set():
+            with VK_DICT_MUTEX:
+                message = None
+                for key in VK_DICT:
+                    if VK_DICT[key]['mark'] is True:
+                        pass
+                    elif VK_DICT[key]['mark'] is False:
+                        message = VK_DICT[key]
+                        VK_DICT[key]['mark'] = True
+                        break
+            if message is None:
+                pass
+            else:
+                answer_message = self.c_bot.think(message)
+                mid = message['id']
+                uid = message['user_id']
+                OUT_QUEUE.put((mid, uid, answer_message))
+        pass
+
+
 class Person(object):
     def __init__(self, id=None):
         self.id = id
@@ -68,8 +102,6 @@ class Person(object):
                         return False
                     else:
                         raise IdError('Something wrong with Person %d' % uid)
-
-
 
 
 class VBot(object):
@@ -127,6 +159,9 @@ class Bot(object):
     def think(self, mod=None):
         pass
 
+def kill_all():
+    ITS_NOT_TIME_TO_DIE.clear()
+
 
 class DB(object):
     def __init__(self, name):
@@ -166,18 +201,14 @@ class DB(object):
             """)
             self.__init__(self.name)
 
-    def get_not_answered(self):
+    def get_all_not_answered(self):
         con = sqlite3.connect(self.name)
         cur = con.cursor()
 
         with con:
             cur.execute("SELECT * FROM NotAnswered")
-            try:
-                choice = random.choice(cur.fetchall())[0]
-            except IndexError:
-                choice = False
-            cur.execute("DELETE FROM NotAnswered WHERE question == ?", (choice,))
-        return choice
+            for question in cur.fetchall():
+                yield question
 
     def get_by_masks(self, masks):
         con = sqlite3.connect(self.name)
@@ -214,16 +245,26 @@ class DB(object):
 class DB_Thread(threading.Thread):
     def __init__(self, name):
         self.db = DB(name)
+        for question in self.db.get_all_not_answered():
+            NOT_ANSWERED.put(question)
         threading.Thread.__init__(self)
+        self.daemon = True
 
     def run(self):
         while True:
-            try:
-                question, answer = DB_QUEUE.get()
-            except Queue.Empty:
-                pass
+            if ITS_NOT_TIME_TO_DIE.is_set():
+                try:
+                    question, answer = DB_QUEUE.get()
+                except Queue.Empty:
+                    ITS_NOT_TIME_TO_DIE.clear()
+                else:
+                    self.db.save(question, answer)
             else:
-                self.db.save(question, answer)
+                break
+        #self.db.clear_not_answered()
+        while NOT_ANSWERED.not_empty:
+            question = NOT_ANSWERED.get()
+            self.db.save(question)
 
 
 class VK_Thread(threading.Thread):
@@ -231,13 +272,16 @@ class VK_Thread(threading.Thread):
         self.vkapi = vkapi
         threading.Thread.__init__(self)
 
+    def LazyChek(self):
+        pass
+
     def run(self):
         while True:
             messages = self.vkapi.messages.getDialogs(unread=1)['items']
             time.sleep(0.5)
-            for message in messages:
-                message['mark'] = False
-                with VK_DICT_MUTEX:
+            with VK_DICT_MUTEX:
+                for message in messages:
+                    message['mark'] = False
                     if 'id' in message:
                         if message['id'] not in VK_DICT:
                             VK_DICT[message['id']] = message
