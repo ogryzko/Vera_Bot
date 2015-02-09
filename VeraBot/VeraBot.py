@@ -15,6 +15,7 @@ import collections
 DB_QUEUE = Queue.Queue()
 VK_DICT = collections.OrderedDict()
 VK_DICT_MUTEX = threading.Lock()
+IN_QUEUE = Queue.Queue()
 OUT_QUEUE = Queue.Queue()
 NOT_ANSWERED = Queue.Queue()
 ITS_NOT_TIME_TO_DIE = threading.Event()
@@ -53,6 +54,7 @@ def sql_from_masks(masks):
 class Session():
     def __init__(self):
         pass
+
 
 class Dialog(threading.Thread):
     def __init__(self):
@@ -132,7 +134,8 @@ class CBot(object):
         unfixed = self.bot.think(s)
         answer = unfixed.replace('|', '\u').decode('unicode_escape')
         question = s
-        DB_QUEUE.put(question, answer)
+        tuple = (question, answer)
+        DB_QUEUE.put(tuple)
         return answer
 
     pass
@@ -158,6 +161,7 @@ class Bot(object):
 
     def think(self, mod=None):
         pass
+
 
 def kill_all():
     ITS_NOT_TIME_TO_DIE.clear()
@@ -200,6 +204,15 @@ class DB(object):
             DROP TABLE IF EXISTS NotAnswered;
             """)
             self.__init__(self.name)
+
+    def print_table(self):
+        con = sqlite3.connect(self.name)
+        cur = con.cursor()
+        cur.execute("SELECT * FROM Answers")
+        answeres = cur.fetchall()
+        print '-' * 20
+        for ans in answeres:
+            print ans[0], ans[1]
 
     def get_all_not_answered(self):
         con = sqlite3.connect(self.name)
@@ -252,16 +265,14 @@ class DB_Thread(threading.Thread):
 
     def run(self):
         while True:
-            if ITS_NOT_TIME_TO_DIE.is_set():
-                try:
-                    question, answer = DB_QUEUE.get()
-                except Queue.Empty:
-                    ITS_NOT_TIME_TO_DIE.clear()
-                else:
-                    self.db.save(question, answer)
+            try:
+                question, answer = DB_QUEUE.get()
+            except Queue.Empty:
+                pass
             else:
-                break
-        #self.db.clear_not_answered()
+                self.db.save(question, answer)
+                self.db.print_table()
+        # self.db.clear_not_answered()
         while NOT_ANSWERED.not_empty:
             question = NOT_ANSWERED.get()
             self.db.save(question)
@@ -304,6 +315,32 @@ class VK_Thread(threading.Thread):
                     del VK_DICT[mid]
 
 
+class Simle_VK_Thread(VK_Thread):
+    def run(self):
+        while True:
+            time.sleep(0.5)
+            try:
+                messages = [i['message'] for i in self.vkapi.messages.getDialogs(unread=1)['items']]
+            except:
+                pass
+            if not messages: continue
+            mids = []
+            print messages
+            for message in messages:
+                IN_QUEUE.put(message)
+                mids.append(message['id'])
+            time.sleep(0.5)
+            self.vkapi.messages.markAsRead(message_ids=mids)
+            try:
+                mid, uid, message = OUT_QUEUE.get()
+            except Queue.Empty:
+                pass
+            else:
+                self.vkapi.messages.setActivity(user_id=str(uid), type='typing')
+                time.sleep(2)
+                self.vkapi.messages.send(user_id=uid, message=message)
+
+
 class IdError(Exception):
     def __init__(self, value):
         self.value = value
@@ -321,6 +358,7 @@ class MultiApi(vk.API):
         with self.vk_mutex:
             vk.API.__getattr__(self, method_name=item)
             time.sleep(1)
+
     pass
 
 
